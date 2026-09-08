@@ -1,0 +1,486 @@
+import React, { useState, useEffect, useCallback } from "react";
+import { Nfc, ScanLine, Lock, ExternalLink, Check, ArrowLeft, Pencil, Loader2 } from "lucide-react";
+
+const DEMO_CODE = "DEMO1234";
+
+function useCardStorage(code) {
+  const [card, setCard] = useState(undefined); // undefined = loading, null = not found
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!code) return;
+    setCard(undefined);
+    try {
+      const result = await window.storage.get(`card:${code}`, true);
+      setCard(result ? JSON.parse(result.value) : null);
+    } catch (e) {
+      setCard(null);
+    }
+  }, [code]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const save = async (data) => {
+    try {
+      const result = await window.storage.set(`card:${code}`, JSON.stringify(data), true);
+      if (!result) throw new Error("Gagal menyimpan");
+      setCard(data);
+      return true;
+    } catch (e) {
+      setError("Gagal menyimpan data. Coba lagi.");
+      return false;
+    }
+  };
+
+  return { card, save, reload: load, error };
+}
+
+function CardChip() {
+  return (
+    <svg width="46" height="34" viewBox="0 0 46 34" fill="none">
+      <rect x="0.5" y="0.5" width="45" height="33" rx="6" fill="#C9A867" stroke="#8A6F3E" strokeWidth="1" />
+      <line x1="15" y1="1" x2="15" y2="33" stroke="#8A6F3E" strokeWidth="1" />
+      <line x1="31" y1="1" x2="31" y2="33" stroke="#8A6F3E" strokeWidth="1" />
+      <line x1="1" y1="11" x2="45" y2="11" stroke="#8A6F3E" strokeWidth="1" />
+      <line x1="1" y1="23" x2="45" y2="23" stroke="#8A6F3E" strokeWidth="1" />
+      <rect x="15" y="11" width="16" height="12" fill="none" stroke="#8A6F3E" strokeWidth="1" />
+    </svg>
+  );
+}
+
+function PhysicalCard({ code, status }) {
+  return (
+    <div
+      className="relative w-full rounded-2xl p-6 text-white shadow-xl"
+      style={{
+        background: "linear-gradient(135deg, #16233A 0%, #0D1826 100%)",
+        aspectRatio: "1.586",
+      }}
+    >
+      <div className="flex items-start justify-between">
+        <CardChip />
+        <Nfc className="w-6 h-6 opacity-70" strokeWidth={1.5} />
+      </div>
+      <div className="mt-6">
+        <p className="text-[11px] tracking-wide opacity-60" style={{ fontFamily: "'JetBrains Mono', monospace" }}>
+          KODE KARTU
+        </p>
+        <p className="text-xl mt-1" style={{ fontFamily: "'JetBrains Mono', monospace", letterSpacing: "0.08em" }}>
+          {code}
+        </p>
+      </div>
+      <div className="absolute bottom-6 left-6 right-6 flex items-center justify-between">
+        <span className="text-sm opacity-80" style={{ fontFamily: "'Fraunces', serif" }}>
+          Ulasan Google
+        </span>
+        <span
+          className={`text-[11px] px-2 py-1 rounded-full ${
+            status === "active" ? "bg-emerald-400/20 text-emerald-300" : "bg-white/10 text-white/60"
+          }`}
+        >
+          {status === "active" ? "Aktif" : "Belum aktif"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ScanScreen({ onScan }) {
+  const [input, setInput] = useState("");
+  return (
+    <div className="flex flex-col items-center text-center px-6 pt-14 pb-10">
+      <div className="w-16 h-16 rounded-full flex items-center justify-center mb-6" style={{ background: "#EDE7DA" }}>
+        <ScanLine className="w-7 h-7" style={{ color: "#16233A" }} strokeWidth={1.5} />
+      </div>
+      <h1 className="text-[26px] leading-tight" style={{ fontFamily: "'Fraunces', serif", color: "#16233A" }}>
+        Tempelkan atau scan kartu
+      </h1>
+      <p className="mt-2 text-[15px]" style={{ color: "#6B6455" }}>
+        Tap NFC ke HP, atau scan kode QR di kartu. Untuk demo ini, masukkan kode kartu secara manual.
+      </p>
+
+      <div className="w-full max-w-xs mt-8">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value.toUpperCase())}
+          placeholder={DEMO_CODE}
+          className="w-full text-center py-3 rounded-xl border text-lg tracking-widest outline-none focus:ring-2"
+          style={{
+            fontFamily: "'JetBrains Mono', monospace",
+            borderColor: "#D9D2C0",
+            background: "#FFFFFF",
+            color: "#16233A",
+          }}
+        />
+        <button
+          onClick={() => onScan(input.trim() || DEMO_CODE)}
+          className="w-full mt-3 py-3 rounded-xl text-white text-[15px] transition-transform active:scale-[0.98]"
+          style={{ background: "#16233A" }}
+        >
+          Buka kartu
+        </button>
+        <button
+          onClick={() => setInput(DEMO_CODE)}
+          className="mt-3 text-[13px] underline underline-offset-2"
+          style={{ color: "#8A8272" }}
+        >
+          Isi kode demo ({DEMO_CODE})
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActivateForm({ code, onActivated }) {
+  const [link, setLink] = useState("");
+  const [pin, setPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const { save } = useCardStorage(code);
+
+  const isValidGoogleLink =
+    /^https:\/\/search\.google\.com\/local\/writereview\?placeid=/.test(link.trim()) ||
+    /^https:\/\/g\.page\/r\//.test(link.trim());
+
+  const handleSubmit = async () => {
+    setFormError("");
+    if (!isValidGoogleLink) {
+      setFormError("Tempel link ulasan Google yang valid (dari search.google.com atau g.page).");
+      return;
+    }
+    if (!/^\d{4}$/.test(pin)) {
+      setFormError("PIN harus 4 digit angka.");
+      return;
+    }
+    if (pin !== confirmPin) {
+      setFormError("Konfirmasi PIN tidak cocok.");
+      return;
+    }
+    setSaving(true);
+    const ok = await save({ link: link.trim(), pin, activatedAt: Date.now() });
+    setSaving(false);
+    if (ok) onActivated();
+    else setFormError("Gagal menyimpan. Coba lagi.");
+  };
+
+  return (
+    <div className="px-6 pb-10">
+      <h2 className="text-[22px] mt-2" style={{ fontFamily: "'Fraunces', serif", color: "#16233A" }}>
+        Aktivasi kartu
+      </h2>
+      <p className="text-[14px] mt-1" style={{ color: "#6B6455" }}>
+        Kode kartu <span style={{ fontFamily: "'JetBrains Mono', monospace" }}>{code}</span>. Kartu ini masih
+        kosong — isi link ulasan bisnis untuk mengaktifkannya.
+      </p>
+
+      <div className="mt-6 space-y-4">
+        <div>
+          <label className="block text-[13px] mb-1.5" style={{ color: "#3A3528" }}>
+            Link ulasan Google
+          </label>
+          <input
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            placeholder="https://search.google.com/local/writereview?placeid=..."
+            className="w-full py-2.5 px-3 rounded-lg border text-[14px] outline-none focus:ring-2"
+            style={{ borderColor: "#D9D2C0", color: "#16233A" }}
+          />
+          <p className="text-[12px] mt-1" style={{ color: "#8A8272" }}>
+            Belum punya link-nya? Cari nama bisnis di Google Maps, klik "Tulis ulasan", lalu salin link dari
+            address bar.
+          </p>
+        </div>
+
+        <div>
+          <label className="block text-[13px] mb-1.5" style={{ color: "#3A3528" }}>
+            Buat PIN (4 digit)
+          </label>
+          <input
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            inputMode="numeric"
+            placeholder="••••"
+            className="w-full py-2.5 px-3 rounded-lg border text-[14px] tracking-[0.3em] outline-none focus:ring-2"
+            style={{ borderColor: "#D9D2C0", color: "#16233A" }}
+          />
+        </div>
+
+        <div>
+          <label className="block text-[13px] mb-1.5" style={{ color: "#3A3528" }}>
+            Konfirmasi PIN
+          </label>
+          <input
+            value={confirmPin}
+            onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            inputMode="numeric"
+            placeholder="••••"
+            className="w-full py-2.5 px-3 rounded-lg border text-[14px] tracking-[0.3em] outline-none focus:ring-2"
+            style={{ borderColor: "#D9D2C0", color: "#16233A" }}
+          />
+        </div>
+
+        {formError && (
+          <p className="text-[13px]" style={{ color: "#B3432B" }}>
+            {formError}
+          </p>
+        )}
+
+        <button
+          onClick={handleSubmit}
+          disabled={saving}
+          className="w-full py-3 rounded-xl text-white text-[15px] flex items-center justify-center gap-2 transition-transform active:scale-[0.98] disabled:opacity-60"
+          style={{ background: "#16233A" }}
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+          {saving ? "Menyimpan..." : "Aktifkan kartu"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ActiveCard({ code, cardData, onEdit }) {
+  return (
+    <div className="px-6 pb-10 text-center">
+      <div
+        className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mt-4 mb-5"
+        style={{ background: "#E4EFE7" }}
+      >
+        <Check className="w-6 h-6" style={{ color: "#3F6C51" }} strokeWidth={2} />
+      </div>
+      <h2 className="text-[22px]" style={{ fontFamily: "'Fraunces', serif", color: "#16233A" }}>
+        Kartu sudah aktif
+      </h2>
+      <p className="text-[14px] mt-1.5" style={{ color: "#6B6455" }}>
+        Siapa pun yang tap atau scan kartu ini akan langsung diarahkan ke halaman ulasan Google.
+      </p>
+
+      <a
+        href={cardData.link}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="mt-6 w-full py-3 rounded-xl text-white text-[15px] flex items-center justify-center gap-2"
+        style={{ background: "#16233A" }}
+      >
+        Buka halaman ulasan <ExternalLink className="w-4 h-4" />
+      </a>
+
+      <button
+        onClick={onEdit}
+        className="mt-3 text-[13px] flex items-center justify-center gap-1.5 mx-auto"
+        style={{ color: "#8A8272" }}
+      >
+        <Pencil className="w-3.5 h-3.5" /> Edit kartu ini
+      </button>
+    </div>
+  );
+}
+
+function EditGate({ code, cardData, onVerified, onBack }) {
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  const handleCheck = () => {
+    if (pin === cardData.pin) {
+      onVerified();
+    } else {
+      setError("PIN salah. Coba lagi.");
+    }
+  };
+
+  return (
+    <div className="px-6 pb-10">
+      <button onClick={onBack} className="flex items-center gap-1 text-[13px] mb-6" style={{ color: "#8A8272" }}>
+        <ArrowLeft className="w-3.5 h-3.5" /> Kembali
+      </button>
+      <div className="text-center">
+        <div
+          className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5"
+          style={{ background: "#EDE7DA" }}
+        >
+          <Lock className="w-6 h-6" style={{ color: "#16233A" }} strokeWidth={1.5} />
+        </div>
+        <h2 className="text-[22px]" style={{ fontFamily: "'Fraunces', serif", color: "#16233A" }}>
+          Masukkan PIN
+        </h2>
+        <p className="text-[14px] mt-1.5" style={{ color: "#6B6455" }}>
+          PIN dibuat saat kartu {code} pertama kali diaktivasi.
+        </p>
+      </div>
+
+      <div className="mt-6 max-w-xs mx-auto">
+        <input
+          value={pin}
+          onChange={(e) => {
+            setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+            setError("");
+          }}
+          inputMode="numeric"
+          placeholder="••••"
+          className="w-full text-center py-3 rounded-xl border text-lg tracking-[0.4em] outline-none focus:ring-2"
+          style={{ borderColor: "#D9D2C0", color: "#16233A" }}
+        />
+        {error && (
+          <p className="text-[13px] mt-2 text-center" style={{ color: "#B3432B" }}>
+            {error}
+          </p>
+        )}
+        <button
+          onClick={handleCheck}
+          className="w-full mt-3 py-3 rounded-xl text-white text-[15px]"
+          style={{ background: "#16233A" }}
+        >
+          Buka
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function EditForm({ code, cardData, onSaved, onBack }) {
+  const [link, setLink] = useState(cardData.link);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const { save } = useCardStorage(code);
+
+  const isValidGoogleLink =
+    /^https:\/\/search\.google\.com\/local\/writereview\?placeid=/.test(link.trim()) ||
+    /^https:\/\/g\.page\/r\//.test(link.trim());
+
+  const handleSave = async () => {
+    if (!isValidGoogleLink) {
+      setError("Tempel link ulasan Google yang valid.");
+      return;
+    }
+    setSaving(true);
+    const ok = await save({ ...cardData, link: link.trim() });
+    setSaving(false);
+    if (ok) onSaved();
+    else setError("Gagal menyimpan. Coba lagi.");
+  };
+
+  return (
+    <div className="px-6 pb-10">
+      <button onClick={onBack} className="flex items-center gap-1 text-[13px] mb-6" style={{ color: "#8A8272" }}>
+        <ArrowLeft className="w-3.5 h-3.5" /> Kembali
+      </button>
+      <h2 className="text-[22px]" style={{ fontFamily: "'Fraunces', serif", color: "#16233A" }}>
+        Ubah link ulasan
+      </h2>
+      <div className="mt-6">
+        <label className="block text-[13px] mb-1.5" style={{ color: "#3A3528" }}>
+          Link ulasan Google
+        </label>
+        <input
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          className="w-full py-2.5 px-3 rounded-lg border text-[14px] outline-none focus:ring-2"
+          style={{ borderColor: "#D9D2C0", color: "#16233A" }}
+        />
+        {error && (
+          <p className="text-[13px] mt-2" style={{ color: "#B3432B" }}>
+            {error}
+          </p>
+        )}
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full mt-4 py-3 rounded-xl text-white text-[15px] disabled:opacity-60"
+          style={{ background: "#16233A" }}
+        >
+          {saving ? "Menyimpan..." : "Simpan perubahan"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export default function CardActivationApp() {
+  const [screen, setScreen] = useState("scan"); // scan | loading | activate | active | edit-gate | edit-form
+  const [code, setCode] = useState(null);
+  const { card, reload } = useCardStorage(code);
+
+  useEffect(() => {
+    if (code === null) return;
+    if (card === undefined) {
+      setScreen("loading");
+    } else if (card === null) {
+      setScreen("activate");
+    } else if (screen === "loading" || screen === "scan") {
+      setScreen("active");
+    }
+  }, [card, code]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleScan = (inputCode) => {
+    setCode(inputCode || DEMO_CODE);
+  };
+
+  const status = card ? "active" : "inactive";
+
+  return (
+    <div
+      className="min-h-screen w-full flex justify-center"
+      style={{ background: "#F7F4EC", fontFamily: "'Inter', system-ui, sans-serif" }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+      `}</style>
+      <div className="w-full max-w-sm">
+        {code && (
+          <div className="px-6 pt-8">
+            <PhysicalCard code={code} status={status} />
+          </div>
+        )}
+
+        {screen === "scan" && <ScanScreen onScan={handleScan} />}
+
+        {screen === "loading" && (
+          <div className="flex flex-col items-center justify-center py-20">
+            <Loader2 className="w-6 h-6 animate-spin" style={{ color: "#16233A" }} />
+          </div>
+        )}
+
+        {screen === "activate" && card !== undefined && (
+          <ActivateForm code={code} onActivated={() => { reload(); setScreen("active"); }} />
+        )}
+
+        {screen === "active" && card && (
+          <ActiveCard code={code} cardData={card} onEdit={() => setScreen("edit-gate")} />
+        )}
+
+        {screen === "edit-gate" && card && (
+          <EditGate
+            code={code}
+            cardData={card}
+            onVerified={() => setScreen("edit-form")}
+            onBack={() => setScreen("active")}
+          />
+        )}
+
+        {screen === "edit-form" && card && (
+          <EditForm
+            code={code}
+            cardData={card}
+            onSaved={() => { reload(); setScreen("active"); }}
+            onBack={() => setScreen("active")}
+          />
+        )}
+
+        {code && (
+          <div className="px-6 pb-8 pt-2 text-center">
+            <button
+              onClick={() => { setCode(null); setScreen("scan"); }}
+              className="text-[12px] underline underline-offset-2"
+              style={{ color: "#B0A890" }}
+            >
+              Ganti kartu
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
